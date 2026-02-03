@@ -1,0 +1,27 @@
+schedule: "0 1 * * *"
+
+mongodb:
+  uri: "compass-configdb"
+  usernameSecret: "configdb-secret"
+  passwordSecret: "configdb-secret"
+
+s3:
+  bucketSecret: "s3-credentials"
+  bucketKey: "S3_BUCKET"
+  prefixKey: "S3_PREFIX"
+  accessKey: "AWS_ACCESS_KEY_ID"
+  secretKey: "AWS_SECRET_ACCESS_KEY"
+  endpoint: "http://minio.minio.svc.cluster.local:9000"
+  retainCount: 15
+
+backupPVC: "config-mongodb-backup-pvc"
+
+images:
+  mongo: "coredgeio/mongo:5.0.3"
+  uploader: "peakcom/s5cmd"
+
+serviceAccount:
+  create: false
+  name: ""
+
+fullnameOverride: "config-mongo-backup"

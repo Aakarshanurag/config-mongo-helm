@@ -1,0 +1,83 @@
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: {{ .Values.fullnameOverride }}
+spec:
+  schedule: {{ .Values.schedule | quote }}
+  jobTemplate:
+    spec:
+      template:
+        spec:
+          restartPolicy: OnFailure
+          volumes:
+            - name: backup-volume
+              persistentVolumeClaim:
+                claimName: {{ .Values.backupPVC }}
+          initContainers:
+            - name: mongo-dump
+              image: {{ .Values.images.mongo }}
+              imagePullPolicy: IfNotPresent
+              command: ["/bin/sh", "-c"]
+              args:
+                - |
+                  timestamp=$(date +%Y-%m-%d_%H-%M-%S)
+                  mongodump --username=$MONGODB_USERNAME --password=$MONGODB_PASSWORD \
+                    --authenticationDatabase admin --host=$MONGODB_URI \
+                    --archive=/tmp/$timestamp.gz --gzip
+                  tar -czf /backups/configdb_$timestamp.tar.gz -C /tmp $timestamp.gz
+              env:
+                - name: MONGODB_URI
+                  value: {{ .Values.mongodb.uri }}
+                - name: MONGODB_USERNAME
+                  valueFrom:
+                    secretKeyRef:
+                      name: {{ .Values.mongodb.usernameSecret }}
+                      key: username
+                - name: MONGODB_PASSWORD
+                  valueFrom:
+                    secretKeyRef:
+                      name: {{ .Values.mongodb.passwordSecret }}
+                      key: password
+              volumeMounts:
+                - mountPath: /backups
+                  name: backup-volume
+          containers:
+            - name: upload
+              image: {{ .Values.images.uploader }}
+              imagePullPolicy: IfNotPresent
+              command: ["/bin/sh", "-c"]
+              args:
+                - |
+                  cd /backups
+                  filename=$(ls *.tar.gz 2>/dev/null | tail -n 1)
+                  [ -z "$filename" ] && echo "No backup file found" && exit 1
+                  echo "Uploading $filename to S3..."
+                  /s5cmd --endpoint-url $S3_ENDPOINT_URL cp "$filename" s3://$S3_BUCKET/$S3_PREFIX/"$filename"
+                  # Cleanup old files in PV
+                  find /backups -type f -mtime +3 -delete || true
+              env:
+                - name: S3_BUCKET
+                  valueFrom:
+                    secretKeyRef:
+                      name: {{ .Values.s3.bucketSecret }}
+                      key: {{ .Values.s3.bucketKey }}
+                - name: S3_PREFIX
+                  valueFrom:
+                    secretKeyRef:
+                      name: {{ .Values.s3.bucketSecret }}
+                      key: {{ .Values.s3.prefixKey }}
+                - name: AWS_ACCESS_KEY_ID
+                  valueFrom:
+                    secretKeyRef:
+                      name: {{ .Values.s3.bucketSecret }}
+                      key: {{ .Values.s3.accessKey }}
+                - name: AWS_SECRET_ACCESS_KEY
+                  valueFrom:
+                    secretKeyRef:
+                      name: {{ .Values.s3.bucketSecret }}
+                      key: {{ .Values.s3.secretKey }}
+                - name: S3_ENDPOINT_URL
+                  value: {{ .Values.s3.endpoint }}
+              volumeMounts:
+                - mountPath: /backups
+                  name: backup-volume
